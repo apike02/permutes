@@ -7,9 +7,8 @@
 #' @return A ggplot2 object.
 #' @export
 plot.permutes <- function (x,type=c('LRT','F','t','beta','w2','cluster_mass'),breaks=NULL,sig=NULL,...) {
-	if (!requireNamespace('ggplot2')) stop('Please install package ggplot2')
-	if (!requireNamespace('viridis')) stop('Please install package viridis')
-	if (!'data.frame' %in% class(x))  stop("Error: 'x' is not a data frame")
+	pkgcheck(c('ggplot2','viridis'))
+	if (!inherits(x,'data.frame')) stop("Error: 'x' is not a data frame")
 
 	plot <- intersect(type,colnames(x))[1]
 	if (is.null(plot)) {
@@ -18,11 +17,11 @@ plot.permutes <- function (x,type=c('LRT','F','t','beta','w2','cluster_mass'),br
 	x <- x[!is.na(x$Factor),]
 
 	if (!is.null(sig)) {
-		x[,plot] <- ifelse(x[[sig]] < .05,x[,plot],NA)
+		x[[plot]] <- ifelse(x[[sig]] < .05,x[[plot]],NA)
 	}
 	x$Factor <- factor(x$Factor,levels=unique(x$Factor)) #make sure ggplot uses the same order as the permutation model
 
-	scale <- if (is.numeric(x[,2])) ggplot2::scale_x_continuous else ggplot2::scale_x_discrete
+	scale <- if (is.numeric(x[[2]])) ggplot2::scale_x_continuous else ggplot2::scale_x_discrete
 	p <- ggplot2::ggplot(data=x,ggplot2::aes_string(x=colnames(x)[1],y=colnames(x)[2]))
 	p <- p + ggplot2::geom_tile(ggplot2::aes_string(fill=plot,color=plot)) + viridis::scale_fill_viridis(option='plasma',direction=if (plot %in% c('p','p.cluster_mass')) -1 else 1) + viridis::scale_color_viridis(option='plasma',direction=if (plot %in% c('p','p.cluster_mass')) -1 else 1)
 	p <- p + ggplot2::theme(panel.background=ggplot2::element_blank(),panel.grid.major=ggplot2::element_blank(),panel.grid.minor=ggplot2::element_blank())
