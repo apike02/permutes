@@ -302,6 +302,13 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 			Fvals <- anovatab$pTerms.chi.sq / anovatab$pTerms.df
 			Fname <- 'F'
 			df <- anovatab$pTerms.df
+			# gam anova removes the intercept; restore it if needed
+			if (names(terms)[1] == '1') {
+				Fval1 <- anovatab$p.t['(Intercept)']^2
+				Fvals <- c(Fval1,Fvals)
+				df <- c(1,df)
+				names(Fvals) <- c('1',rownames(anovatab$pTerms.table))
+			}
 		} else {
 			if (is.mer) {
 				anovatab <- car::Anova(bm@model,type=3,test='Chisq')
@@ -324,8 +331,8 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 				}
 			}
 			df <- anovatab$Df
+			names(Fvals) <- rownames(anovatab)
 		}
-		names(Fvals) <- rownames(anovatab)
 		if (length(Fvals) < length(terms)) { #rank-deficiency
 			missing <- setdiff(names(terms),names(Fvals))
 			Fvals[missing] <- NA
