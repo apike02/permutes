@@ -172,8 +172,13 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		terms <- stats::setNames(,formula$term[fixed])
 	}
 
-	.weights <- data$.weights; .offset <- data$.offset #silence R CMD check warning
-	bm <- buildmer::buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl,weights=.weights,offset=.offset)
+	.weights <- data$.weights; .offset <- data$.offset #silence R CMD check warning; also necessary for buildmer =2.0, which did not support NSE for these
+	if (utils::packageVersion('buildmer') < '2.0') {
+		bm <- buildmer::buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl,weights=.weights,offset=.offset)
+	} else {
+		buildmerControl$args <- c(buildmerControl$args,list(weights=.weights,offset=.offset))
+		bm <- buildmer::buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl)
+	}
 	perms <- lapply(terms,function (term) {
 		if (verbose) {
 			time <- Sys.time()
