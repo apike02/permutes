@@ -189,7 +189,7 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		# 1. Get the marginal errors calculated by the alternative model
 		# 2. To account for these errors' non-independence: weight the errors by the inverse of the random-effects correlation matrix
 			# V0 = sigma^2_b_1_0 * ZtZ + sigma^2_e_0I
-		# 3. Weigh by Ut0^-1, where U0 = chol(V0)
+		# 3. Weight by Ut0^-1, where U0 = chol(V0)
 			# lme4 parameterizes sigma^2_b_1_0 Z = Z Lambda_theta and we really want their transpose
 		# 4. Permute the unweighted errors, then reweight the permuted data
 		# 5. Reestimate *both* models with the fixed effects removed, which is necessary if any random effects happened to be similar

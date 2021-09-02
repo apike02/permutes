@@ -4,4 +4,4 @@ README\.md
 man-roxygen
 permutes-Ex\.Rout
 permutes_.*\.tar\.gz
-R/old_implementation.R
+.*\.git
