@@ -330,6 +330,10 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 					Fvals <- anovatab$Chisq
 					Fname <- 'Chisq'
 				}
+				if (rownames(anovatab)[nr <- length(Fvals)] == 'Residuals') {
+					anovatab <- anovatab[-nr,]
+					Fvals <- Fvals[-nr]
+				}
 			}
 			df <- anovatab$Df
 			names(Fvals) <- rownames(anovatab)
