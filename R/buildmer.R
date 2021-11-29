@@ -147,30 +147,39 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 	fixed <- is.na(formula$grouping)
 	terms <- stats::setNames(,formula$term[fixed])
 
+	# For the fixed effects, we need to normalize the term/factor names (GH issue #4)
+	formula.fx <- buildmer::build.formula(NULL,formula[fixed,])
+	mm <- model.matrix(formula.fx,data)
 	if (type == 'regression') {
-		# Convert factor terms into individual parameters
-		env <- environment(formula)
-		for (term in terms) {
-			if (is.factor(data[[term]])) {
-				X <- stats::model.matrix(stats::as.formula(paste0('~',term)),data)[,-1,drop=FALSE]
-				if (is.vector(X)) {
-					next #only one contrast
-				}
-				formula <- formula[!(formula$term == term & fixed),]
-				colnames(X) <- paste0(term,'_',colnames(X))
-				if (length(bad <- intersect(colnames(X),colnames(data)))) {
-					stop('Please rename the columns ',paste(bad,collapse=', '),' in your data')
-				}
-				for (x in colnames(X)) {
-					data[[x]] <- X[,x] #we can't use cbind as that will drop contrasts
-				}
-				formula <- rbind(formula,data.frame(index=NA,grouping=NA,term=colnames(X),code=unname(term),block=unname(term)))
-				fixed <- is.na(formula$grouping)
-			}
+		# one column per coefficient
+		old.names <- colnames(mm)
+		terms <- apply(mm,2,identity,simplify=FALSE)
+	} else {
+		# multiple columns per coefficient
+		assign <- attr(mm,'assign')
+		tl <- attr(terms(formula.fx),'term.labels')
+		if (0 %in% assign) {
+			tl <- c('(Intercept)',tl)
+			assign <- assign + 1
 		}
-		environment(formula) <- env
-		terms <- stats::setNames(,formula$term[fixed])
+		old.names <- tl
+		terms <- lapply(1:length(tl),function (i) {
+			term <- tl[i]
+			cols <- which(assign == i)
+			mm[,cols]
+		})
 	}
+	new.names <- paste0('X',1:length(old.names))
+	for (i in 1:length(new.names)) {
+		if (new.names[i] %in% names(data)) {
+			stop('Please remove column ',new.names[i],' from your data; its name conflicts with a name used internally in permutes!')
+		}
+		data[[new.names[i]]] <- terms[[i]]
+	}
+	new.formula <- data.frame(index=NA,grouping=NA,term=new.names,code=new.names,block=new.names)
+	e <- environment(formula)
+	formula <- rbind(new.formula,formula[!fixed,])
+	environment(formula) <- e
 
 	.weights <- data$.weights; .offset <- data$.offset #silence R CMD check warning; also necessary for buildmer =2.0, which did not support NSE for these
 	if (utils::packageVersion('buildmer') < '2.0') {
@@ -179,10 +188,11 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		buildmerControl$args <- c(buildmerControl$args,list(weights=.weights,offset=.offset))
 		bm <- buildmer::buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl)
 	}
-	perms <- lapply(terms,function (term) {
+
+	perms <- lapply(1:length(new.names),function (i) {
 		if (verbose) {
 			time <- Sys.time()
-			nmodels <- length(terms) * length(unique(timepoints))
+			nmodels <- length(new.names) * length(unique(timepoints))
 		}
 
 		# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3883440/ propose that, to test a random effect:
@@ -200,7 +210,7 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 
 		# 1. Get the marginal errors based on quantities from the alternative model
 		# These are y - XB - Zu, with the effect of interest *removed* from X
-		# It's easier for us to just take the residuals and add this effect back in, but we need to figure out its name...
+		# It's easier for us to just take the residuals and add this effect back in
 		if (inherits(bm@model,'merMod')) {
 			X <- lme4::getME(bm@model,'X')
 			B <- lme4::fixef(bm@model)
@@ -208,36 +218,10 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 			X <- stats::model.matrix(formula(bm@model),data)
 			B <- stats::coef(bm@model)
 		}
-		if (any(i <- !is.finite(B))) {
-			B[i] <- 0
-		}
-		if (term == '1') {
-			# If it's the intercept, things are simple
-			X[colnames(X) != '(Intercept)'] <- 0
-			e <- stats::resid(bm@model) + X %*% B
-			X <- X[,colnames(X) == '(Intercept)']
-		} else {
-			# If it's not the intercept, things are more complicated: we need to figure out the name in the model matrix
-			tab.full <- formula[is.na(formula$grouping),]
-			formula.full <- buildmer::build.formula(NULL,tab.full)
-			X.full <- stats::model.matrix(formula.full,data)
-			tab.restricted <- formula[formula$term != term & is.na(formula$grouping),]
-			formula.restricted <- buildmer::build.formula(NULL,tab.restricted)
-			X.restricted <- stats::model.matrix(formula.restricted,data)
-			if (!(NCOL(X.full) > NCOL(X.restricted))) {
-				return(list(perms=0*1:nperm,LRT=0,df=0))
-			}
-			normalized.colnames <- function (X) { #because interaction terms may have been wickedly reordered between colnames(X) and colnames(X.restricted)
-				split <- strsplit(colnames(X),':')
-				norm <- lapply(split,sort)
-				sapply(norm,paste0,collapse=':')
-			}
-			stopifnot(all(normalized.colnames(X.restricted) %in% normalized.colnames(X)))
-			want <- !normalized.colnames(X) %in% normalized.colnames(X.restricted)
-			X[,!want] <- 0
-			e <- stats::resid(bm@model) + X %*% B
-			X <- X[,want]
-		}
+		discard <- names(B) != new.names[i]
+		discard <- discard | !is.finite(B) #rank-deficiency in lm
+		B[discard] <- 0
+		e <- stats::resid(bm@model) + X %*% B
 
 		# 2/3. Random effects have already been partialed out, so these are independent and exchangeable
 		# 4/5. Permute them and estimate a null and alternative model on the permuted data
@@ -274,42 +258,30 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		list(perms=perms,LRT=LRT,df=df)
 	})
 	LRT <- sapply(perms,`[[`,'LRT')
+	names(LRT) <- new.names
+
 	scale.est <- !family(bm@model)$family %in% c('binomial','poisson')
 	is.mer <- inherits(bm@model,'merMod')
 	if (type == 'regression') {
-		se <- sqrt(diag(as.matrix(stats::vcov(bm@model)))) #as.matrix needed to work around 'Error in diag(vcov(bm@model)) : long vectors not supported yet: array.c:2186'
 		if (inherits(bm@model,'merMod')) {
 			beta <- lme4::fixef(bm@model)
-			if (length(beta) < length(terms)) { #rank-deficiency
-				missing <- setdiff(names(terms),names(beta))
-				names(se) <- names(beta)
-				beta[missing] <- NA
-				se[missing] <- NA
-				beta <- beta[names(terms)]
-				se <- se[names(terms)]
-			}
 		} else {
 			beta <- stats::coef(bm@model)
 		}
-		tname <- if (scale.est) 't' else 'z'
-		df <- data.frame(Factor=unname(terms),LRT=unname(LRT),beta=unname(beta),t=unname(beta/se))
-		colnames(df)[4] <- tname
-		list(terms=terms,perms=perms,df=df)
+		se <- sqrt(diag(as.matrix(stats::vcov(bm@model)))) #as.matrix needed to work around 'Error in diag(vcov(bm@model)) : long vectors not supported yet: array.c:2186'
+		LRT   <- LRT[new.names]
+		beta  <- beta[new.names]
+		se    <- se[new.names]
+		df    <- data.frame(Factor=old.names,LRT=unname(LRT),beta=unname(beta),t=unname(beta/se))
+		colnames(df)[4] <- if (scale.est) 't' else 'z'
+		list(terms=old.names,perms=perms,df=df)
 	} else {
 		if (inherits(bm@model,'gam')) {
 			anovatab <- stats::anova(bm@model) #is Type III
 			Fvals <- anovatab$pTerms.chi.sq / anovatab$pTerms.df
 			Fname <- 'F'
 			df <- anovatab$pTerms.df
-			# gam anova removes the intercept; restore it if needed
-			if (names(terms)[1] == '1') {
-				Fval1 <- anovatab$p.t['(Intercept)']^2
-				Fvals <- c(Fval1,Fvals)
-				df <- c(1,df)
-				names(Fvals) <- c('1',rownames(anovatab$pTerms.table))
-			} else {
-				names(Fvals) <- rownames(anovatab$pTerms.table)
-			}
+			names(df) <- names(Fvals) <- rownames(anovatab$pTerms.table)
 		} else {
 			if (is.mer) {
 				anovatab <- car::Anova(bm@model,type=3,test='Chisq')
@@ -336,15 +308,13 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 				}
 			}
 			df <- anovatab$Df
-			names(Fvals) <- rownames(anovatab)
+			names(df) <- names(Fvals) <- rownames(anovatab)
 		}
-		if (length(Fvals) < length(terms)) { #rank-deficiency
-			missing <- setdiff(names(terms),names(Fvals))
-			Fvals[missing] <- NA
-			Fvals <- Fvals[names(terms)]
-		}
-		df <- data.frame(Factor=unname(terms),df=df,LRT=unname(LRT),F=unname(Fvals))
+		df    <- df[new.names]
+		LRT   <- LRT[new.names]
+		Fvals <- Fvals[new.names]
+		df <- data.frame(Factor=old.names,df=df,LRT=unname(LRT),F=unname(Fvals))
 		colnames(df)[4] <- Fname
-		list(terms=terms,perms=perms,df=df)
+		list(terms=old.names,perms=perms,df=df)
 	}
 }
