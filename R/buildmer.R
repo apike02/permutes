@@ -148,8 +148,9 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 	terms <- stats::setNames(,formula$term[fixed])
 
 	# For the fixed effects, we need to normalize the term/factor names (GH issue #4)
+	# Don't try to be clever and set new.names <- old.names; we don't want to overwrite e.g. factors in the user data with model-matrix columns -- we don't know how they interact with the user's r.e. specification
 	formula.fx <- buildmer::build.formula(NULL,formula[fixed,])
-	mm <- model.matrix(formula.fx,data)
+	mm <- stats::model.matrix(formula.fx,data)
 	if (type == 'regression') {
 		# one column per coefficient
 		old.names <- colnames(mm)
@@ -164,9 +165,9 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		}
 		old.names <- tl
 		terms <- lapply(1:length(tl),function (i) {
-			term <- tl[i]
-			cols <- which(assign == i)
-			mm[,cols]
+			cols <- mm[,assign == i,drop=FALSE]
+			colnames(cols) <- rep('',ncol(cols))
+			cols
 		})
 	}
 	new.names <- paste0('X',1:length(old.names))
@@ -218,9 +219,11 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 			X <- stats::model.matrix(formula(bm@model),data)
 			B <- stats::coef(bm@model)
 		}
-		discard <- names(B) != new.names[i]
-		discard <- discard | !is.finite(B) #rank-deficiency in lm
-		B[discard] <- 0
+		keep <- colnames(X) == new.names[i]
+		X[,!keep] <- 0 #must modify X rather than B because X will be used as predictors in the permuted models
+		if (any(wh <- !is.finite(B))) { #rank-deficiency in lm
+			B[wh] <- 0
+		}
 		e <- stats::resid(bm@model) + X %*% B
 
 		# 2/3. Random effects have already been partialed out, so these are independent and exchangeable
@@ -268,7 +271,7 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		} else {
 			beta <- stats::coef(bm@model)
 		}
-		se <- sqrt(diag(as.matrix(stats::vcov(bm@model)))) #as.matrix needed to work around 'Error in diag(vcov(bm@model)) : long vectors not supported yet: array.c:2186'
+		se    <- sqrt(diag(as.matrix(stats::vcov(bm@model)))) #as.matrix needed to work around 'Error in diag(vcov(bm@model)) : long vectors not supported yet: array.c:2186'
 		LRT   <- LRT[new.names]
 		beta  <- beta[new.names]
 		se    <- se[new.names]
