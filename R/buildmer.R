@@ -112,8 +112,8 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 		df.LRT <- max(sapply(this.factor,function (x) x$df),na.rm=TRUE) #these will all be the same (because they are the same model comparison and these are ndf), except possibly in cases of rank-deficiency, hence why max is correct
 		thresh <- stats::qchisq(.95,df.LRT)
 		samp   <- sapply(this.factor,function (x) c(x$LRT,x$perms)) #columns are time, rows are samples
-		p      <- apply(samp,2,function (x) sum(x[-1] >= x[1],na.rm=TRUE) / sum(!is.na(x)))
-		stat   <- if (has.series) permuco::compute_clustermass(samp,thresh,sum,'greater')$main else NA
+		p      <- apply(samp,2,function (x) if (sum(!is.na(x)) == 1) NA else mean(x[-1] >= x[1],na.rm=TRUE))
+		stat   <- if (has.series) suppressWarnings(permuco::compute_clustermass(samp,thresh,sum,'greater'))$main else NA
 		df[df$Factor == x,c('p','cluster_mass','p.cluster_mass','cluster')] <- c(p,stat)
 	}
 
@@ -230,22 +230,28 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		# 4/5. Permute them and estimate a null and alternative model on the permuted data
 		# The offset has been partialed out already, so will be ignored
 		fit <- if (bm@p$is.gaussian) function (formula,data) stats::lm(formula,data,weights=.weights) else function (formula,data) suppressWarnings(stats::glm(formula,family=family,data=data,weights=.weights))
-		perms <- lapply(1:nperm,function (i) try({
-			s <- sample(seq_along(e))
-			data <- list(
-				y = family$linkinv(e[s]),
-				X = X,
-				.weights = data$.weights[s]
-			)
-			m1 <- fit(y ~ 0+X,data)
-			m0 <- fit(y ~ 0,data)
-			as.numeric(2*(stats::logLik(m1)-stats::logLik(m0)))
-		},silent=TRUE))
-		bad <- sapply(perms,inherits,'try-error')
-		if (any(bad)) {
-			perms[bad] <- NA
+
+		# Optimization: nothing to do if the actually-kept columns are constant
+		if (length(unique(as.vector(X[,keep]))) == 1) {
+			perms <- NA
+		} else {
+			perms <- lapply(1:nperm,function (i) try({
+				s <- sample(seq_along(e))
+				data <- list(
+					y = family$linkinv(e[s]),
+					X = X,
+					.weights = data$.weights[s]
+				)
+				m1 <- fit(y ~ 0+X,data)
+				m0 <- fit(y ~ 0,data)
+				as.numeric(2*(stats::logLik(m1)-stats::logLik(m0)))
+			},silent=TRUE))
+			bad <- sapply(perms,inherits,'try-error')
+			if (any(bad)) {
+				perms[bad] <- NA
+			}
+			perms <- unlist(perms)
 		}
-		perms <- unlist(perms)
 
 		# Wrap up
 		data$y <- family$linkinv(e)
