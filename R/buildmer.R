@@ -113,7 +113,15 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 		thresh <- stats::qchisq(.95,df.LRT)
 		samp   <- sapply(this.factor,function (x) c(x$LRT,x$perms)) #columns are time, rows are samples
 		p      <- apply(samp,2,function (x) if (sum(!is.na(x)) == 1) NA else mean(x[-1] >= x[1],na.rm=TRUE))
-		stat   <- if (has.series) suppressWarnings(permuco::compute_clustermass(samp,thresh,sum,'greater'))$main else NA
+		if (has.series) {
+			# see GH issue #4: computing the cluster-mass test will fail in some cases, e.g. when only the intercept is involved (which is not permuted)
+			stat <- try(suppressWarnings(permuco::compute_clustermass(samp,thresh,sum,'greater'))$main,silent=TRUE)
+			if (inherits(stat,'try-error')) {
+				stat <- NA
+			}
+		} else {
+			stat <- NA
+		}
 		df[df$Factor == x,c('p','cluster_mass','p.cluster_mass','cluster')] <- c(p,stat)
 	}
 
@@ -222,7 +230,7 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		keep <- colnames(X) == new.names[i]
 		X[,!keep] <- 0 #must modify X rather than B because X will be used as predictors in the permuted models
 		if (any(wh <- !is.finite(B))) { #rank-deficiency in lm
-			B[wh] <- 0
+			X[,wh] <- 0
 		}
 		e <- stats::resid(bm@model) + X %*% B
 
@@ -230,7 +238,6 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		# 4/5. Permute them and estimate a null and alternative model on the permuted data
 		# The offset has been partialed out already, so will be ignored
 		fit <- if (bm@p$is.gaussian) function (formula,data) stats::lm(formula,data,weights=.weights) else function (formula,data) suppressWarnings(stats::glm(formula,family=family,data=data,weights=.weights))
-
 		# Optimization: nothing to do if the actually-kept columns are constant
 		if (length(unique(as.vector(X[,keep]))) == 1) {
 			perms <- NA
