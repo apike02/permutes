@@ -24,7 +24,7 @@
 #' }
 #' @importFrom stats gaussian
 #' @export
-clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,offset=NULL,series.var=~0,buildmerControl=list(direction='order',crit='LRT',quiet=TRUE,ddf='lme4'),nperm=1000,type='regression',parallel=FALSE,progress='none') {
+clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,offset=NULL,series.var=~0,buildmerControl=list(direction='order',crit='LRT',quiet=TRUE),nperm=1000,type='regression',parallel=FALSE,progress='none') {
 	if (length(type) != 1 || !type %in% c('anova','regression')) {
 		stop("Invalid 'type' argument (specify one of 'anova' or 'regression')")
 	}
@@ -113,14 +113,13 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 		thresh <- stats::qchisq(.95,df.LRT)
 		samp   <- sapply(this.factor,function (x) c(x$LRT,x$perms)) #columns are time, rows are samples
 		p      <- apply(samp,2,function (x) if (sum(!is.na(x)) == 1) NA else mean(x[-1] >= x[1],na.rm=TRUE))
+		# see GH issue #4: computing the cluster-mass test will fail in some cases, e.g. when only the intercept is involved (which is not permuted)
+		stat   <- rep(NA,NCOL(samp)) #account for the possible failure case
 		if (has.series) {
-			# see GH issue #4: computing the cluster-mass test will fail in some cases, e.g. when only the intercept is involved (which is not permuted)
-			stat <- try(suppressWarnings(permuco::compute_clustermass(samp,thresh,sum,'greater'))$main,silent=TRUE)
-			if (inherits(stat,'try-error')) {
-				stat <- NA
+			cmass <- try(suppressWarnings(permuco::compute_clustermass(samp,thresh,sum,'greater'))$main,silent=TRUE)
+			if (!inherits(cmass,'try-error')) {
+				stat <- cmass #succeeded!
 			}
-		} else {
-			stat <- NA
 		}
 		df[df$Factor == x,c('p','cluster_mass','p.cluster_mass','cluster')] <- c(p,stat)
 	}
@@ -141,9 +140,6 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 	if (is.null(buildmerControl$quiet)) {
 		buildmerControl$quiet <- TRUE
 	}
-	if (is.null(buildmerControl$ddf)) {
-		buildmerControl$ddf <- 'lme4'
-	}
 
 	# First, make sure we only work with the tabular representation of the formula
 	if (inherits(formula,'formula')) {
@@ -162,7 +158,8 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 	if (type == 'regression') {
 		# one column per coefficient
 		old.names <- colnames(mm)
-		terms <- apply(mm,2,identity,simplify=FALSE)
+		#terms <- apply(mm,2,identity,simplify=FALSE) #R >=4.1
+		terms <- lapply(1:NCOL(mm),function (i) mm[,i])
 	} else {
 		# multiple columns per coefficient
 		assign <- attr(mm,'assign')
