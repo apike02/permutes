@@ -72,16 +72,6 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 	if (is.function(family)) {
 		family <- family()
 	}
-	wrap <- function (t,fun,formula,data,family,timepoints,buildmerControl,nperm,type,verbose) {
-		errfun <- function (e) {
-			# error in permutation-test function, return an empty result for this timepoint
-			warning(e)
-			data.frame(Factor=NA,p=NA)
-		}
-		ix <- timepoints == t
-		data <- data[ix,]
-		model <- tryCatch(fun(t,formula,data,family,timepoints,buildmerControl,nperm,type,verbose),error=errfun)
-	}
 	if (has.series) {
 		if (isTRUE(parallel)) {
 			verbose <- progress != 'none'
@@ -95,6 +85,16 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 	} else {
 		verbose <- if (is.logical(progress)) progress else progress != 'none'
 		progress <- 'none'
+	}
+	wrap <- function (t,fun,formula,data,family,timepoints,buildmerControl,nperm,type,verbose) {
+		errfun <- function (e) {
+			# error in permutation-test function, return an empty result for this timepoint
+			warning(e)
+			data.frame(Factor=NA,p=NA)
+		}
+		ix <- timepoints == t
+		data <- data[ix,]
+		tryCatch(fun(t,formula,data,family,timepoints,buildmerControl,nperm,type,verbose),error=errfun)
 	}
 	results <- plyr::alply(sort(unique(timepoints)),1,wrap,fit.buildmer,formula,data,family,timepoints,buildmerControl,nperm,type,verbose,.parallel=parallel,.progress=progress,.inform=FALSE)
 	terms <- lapply(results,`[[`,'terms')
