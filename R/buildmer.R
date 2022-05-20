@@ -25,6 +25,42 @@
 #' @importFrom stats gaussian
 #' @export
 clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,offset=NULL,series.var=~0,buildmerControl=list(direction='order',crit='LRT',quiet=TRUE),nperm=1000,type='regression',parallel=FALSE,progress='none') {
+	return(clusterperm.work(buildmer::buildmer,formula,data,family,weights,offset,series.var,buildmerControl,nperm,type,parallel,progress))
+}
+
+#' Cluster-based permutation tests for time series data, based on \code{buildglmmTMB}.
+#' @param formula A normal formula, possibly using \code{lme4}-style random effects. This can also be a buildmer terms object, provided \code{dep} is passed in \code{buildmerControl}. Only a single response variable is supported. For binomial models, the \code{cbind} syntax is not supported; please convert your dependent variable to a proportion and use weights instead.
+#' @param family The family.
+#' @param data The data.
+#' @template weightsoffset
+#' @param series.var A one-sided formula giving the variable grouping the time series.
+#' @template buildmer1
+#' @param parallel Whether to parallelize the permutation testing using plyr's \code{parallel} option. Needs some additional set-up; see the plyr documentation.
+#' @param progress A plyr \code{.progress} bar name, see the plyr documentation. If not \code{'none'} while \code{parallel=TRUE}, an ad-hoc solution will be used, which will be visible if the cluster nodes were created with \code{outfile=''}.
+#' @template buildmer2
+#' @details
+#' \code{buildglmmTMB} is much slower than \code{clusterperm.lmer}, but it is also more flexible, allowing for things like beta regression and zero-inflation.
+#' @examples
+#' \donttest{
+#' # buildglmmTMB is much slower than clusterperm.lmer
+#' \dontshow{if (FALSE)}
+#' perms <- clusterperm.glmmTMB(Fz ~ Deviant * Session + (Deviant * Session | Subject),
+#' 	data=MMN[MMN$Time > 150 & MMN$Time < 250,],series.var=~Time)
+#' \dontshow{
+#' perms <- clusterperm.glmmTMB(Fz ~ Deviant*Session + (1|Subject),data=MMN[MMN$Time > 200 & MMN$Time < 205,],series.var=~Time,nperm=2,type='regression')
+#' }
+#' }
+#' @importFrom stats gaussian
+#' @export
+clusterperm.glmmTMB <- function (formula,data=NULL,family=gaussian(),weights=NULL,offset=NULL,series.var=~0,buildmerControl=list(direction='order',crit='LRT',quiet=TRUE),nperm=1000,type='regression',parallel=FALSE,progress='none') {
+	if (type == 'anova') {
+		stop('ANOVA is not available for glmmTMB models')
+	}
+	pkgcheck(c('glmmTMB','buildmer'))
+	return(clusterperm.work(buildmer::buildglmmTMB,formula,data,family,weights,offset,series.var,buildmerControl,nperm,type,parallel,progress))
+}
+
+clusterperm.work <- function (buildmer,formula,data,family,weights,offset,series.var,buildmerControl,nperm,type,parallel,progress) {
 	if (length(type) != 1 || !type %in% c('anova','regression')) {
 		stop("Invalid 'type' argument (specify one of 'anova' or 'regression')")
 	}
@@ -86,7 +122,7 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 		verbose <- if (is.logical(progress)) progress else progress != 'none'
 		progress <- 'none'
 	}
-	wrap <- function (t,fun,formula,data,family,timepoints,buildmerControl,nperm,type,verbose) {
+	wrap <- function (t,fun,buildmer,formula,data,family,timepoints,buildmerControl,nperm,type,verbose) {
 		errfun <- function (e) {
 			# error in permutation-test function, return an empty result for this timepoint
 			warning(e)
@@ -94,9 +130,9 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 		}
 		ix <- timepoints == t
 		data <- data[ix,]
-		tryCatch(fun(t,formula,data,family,timepoints,buildmerControl,nperm,type,verbose),error=errfun)
+		tryCatch(fun(t,buildmer,formula,data,family,timepoints,buildmerControl,nperm,type,verbose),error=errfun)
 	}
-	results <- plyr::alply(sort(unique(timepoints)),1,wrap,fit.buildmer,formula,data,family,timepoints,buildmerControl,nperm,type,verbose,.parallel=parallel,.progress=progress,.inform=FALSE)
+	results <- plyr::alply(sort(unique(timepoints)),1,wrap,fit.buildmer,buildmer,formula,data,family,timepoints,buildmerControl,nperm,type,verbose,.parallel=parallel,.progress=progress,.inform=FALSE)
 	terms <- lapply(results,`[[`,'terms')
 	perms <- lapply(results,`[[`,'perms')
 	df <- plyr::ldply(results,`[[`,'df',.id=series.var)
@@ -135,7 +171,7 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 	return(df)
 }
 
-fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm,type,verbose) {
+fit.buildmer <- function (t,buildmer,formula,data,family,timepoints,buildmerControl,nperm,type,verbose) {
 	buildmerControl$direction <- 'order'
 	if (is.null(buildmerControl$quiet)) {
 		buildmerControl$quiet <- TRUE
@@ -189,10 +225,10 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 
 	.weights <- data$.weights; .offset <- data$.offset #silence R CMD check warning; also necessary for buildmer =2.0, which did not support NSE for these
 	if (utils::packageVersion('buildmer') < '2.0') {
-		bm <- buildmer::buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl,weights=.weights,offset=.offset)
+		bm <- buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl,weights=.weights,offset=.offset)
 	} else {
 		buildmerControl$args <- c(buildmerControl$args,list(weights=.weights,offset=.offset))
-		bm <- buildmer::buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl)
+		bm <- buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl)
 	}
 
 	perms <- lapply(1:length(new.names),function (i) {
@@ -217,7 +253,10 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		# 1. Get the marginal errors based on quantities from the alternative model
 		# These are y - XB - Zu, with the effect of interest *removed* from X
 		# It's easier for us to just take the residuals and add this effect back in
-		if (inherits(bm@model,'merMod')) {
+		if (inherits(bm@model,'glmmTMB')) {
+			X <- lme4::getME(bm@model,'X')
+			B <- lme4::fixef(bm@model)$cond
+		} else if (inherits(bm@model,'merMod')) {
 			X <- lme4::getME(bm@model,'X')
 			B <- lme4::fixef(bm@model)
 		} else {
@@ -229,23 +268,26 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		if (any(wh <- !is.finite(B))) { #rank-deficiency in lm
 			X[,wh] <- 0
 		}
-		e <- stats::resid(bm@model) + X %*% B
+		e <- as.vector(stats::resid(bm@model) + X %*% B)
+		e <- family$linkinv(e)
 
 		# 2/3. Random effects have already been partialed out, so these are independent and exchangeable
 		# 4/5. Permute them and estimate a null and alternative model on the permuted data
 		# The offset has been partialed out already, so will be ignored
-		fit <- if (bm@p$is.gaussian) function (formula,data) stats::lm(formula,data,weights=.weights) else function (formula,data) suppressWarnings(stats::glm(formula,family=family,data=data,weights=.weights))
+		fit <- function (formula,data) suppressWarnings(buildmer(formula,data,family=family,buildmerControl=list(REML=FALSE,quiet=TRUE,direction=NULL,calc.summary=FALSE,calc.anova=FALSE,weights=.weights)))@model
+		data <- list(
+			y = e,
+			X = X[,keep],
+			.weights = data$.weights
+		)
 		# Optimization: nothing to do if the actually-kept columns are constant
 		if (length(unique(as.vector(X[,keep]))) == 1) {
 			perms <- NA
 		} else {
 			perms <- lapply(1:nperm,function (i) try({
 				s <- sample(seq_along(e))
-				data <- list(
-					y = family$linkinv(e[s]),
-					X = X,
-					.weights = data$.weights[s]
-				)
+				data$y <- data$y[s]
+				data$.weights <- data$.weights[s]
 				m1 <- fit(y ~ 0+X,data)
 				m0 <- fit(y ~ 0,data)
 				as.numeric(2*(stats::logLik(m1)-stats::logLik(m0)))
@@ -258,10 +300,10 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 		}
 
 		# Wrap up
-		data$y <- family$linkinv(e)
-		data$X <- X
-		ll1 <- stats::logLik(fit(y ~ 0+X,data))
-		ll0 <- stats::logLik(fit(y ~ 0,data))
+		m1  <- fit(y ~ 0+X,data)
+		m0  <- fit(y ~ 0,data)
+		ll1 <- stats::logLik(m1)
+		ll0 <- stats::logLik(m0)
 		LRT <- as.numeric(2*(ll1-ll0))
 		df  <- attr(ll1,'df') - attr(ll0,'df')
 		if (verbose) {
@@ -276,12 +318,15 @@ fit.buildmer <- function (t,formula,data,family,timepoints,buildmerControl,nperm
 	scale.est <- !family(bm@model)$family %in% c('binomial','poisson')
 	is.mer <- inherits(bm@model,'merMod')
 	if (type == 'regression') {
-		if (inherits(bm@model,'merMod')) {
-			beta <- lme4::fixef(bm@model)
+		if (inherits(bm@model,'glmmTMB')) {
+			beta <- lme4::fixef(bm@model)$cond
+			vcov <- stats::vcov(bm@model)$cond
 		} else {
-			beta <- stats::coef(bm@model)
+			beta <- (if (inherits(bm@model,'merMod')) lme4::fixef else stats::coef)(bm@model)
+			vcov <- stats::vcov(bm@model)
 		}
-		se    <- sqrt(diag(as.matrix(stats::vcov(bm@model)))) #as.matrix needed to work around 'Error in diag(vcov(bm@model)) : long vectors not supported yet: array.c:2186'
+		vcov  <- vcov[new.names,new.names]
+		se    <- sqrt(diag(as.matrix(vcov))) #as.matrix needed to work around 'Error in diag(vcov(bm@model)) : long vectors not supported yet: array.c:2186'
 		LRT   <- LRT[new.names]
 		beta  <- beta[new.names]
 		se    <- se[new.names]
