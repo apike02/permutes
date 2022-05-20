@@ -15,11 +15,6 @@
 #' @importFrom stats gaussian
 #' @export
 clusterperm.lm <- function (formula,data=NULL,family=gaussian(),weights=NULL,offset=NULL,series.var,buildmerControl=list(direction='order',crit='LRT',quiet=TRUE,ddf='lme4'),nperm=1000,type='regression',parallel=FALSE,progress='none') {
-	if (type == 'regression') {
-		pkgcheck('buildmer')
-	} else {
-		pkgcheck(c('buildmer','car'))
-	}
 	if (!is.data.frame(formula)) {
 		if ('dep' %in% names(buildmerControl)) stop('Something is wrong --- formula is not a data frame, but dep has been passed to buildmerControl')
 		buildmerControl$dep <- as.character(formula[2])
@@ -50,7 +45,7 @@ clusterperm.lm <- function (formula,data=NULL,family=gaussian(),weights=NULL,off
 #' }
 #' @seealso clusterperm.lmer
 #' @export
-clusterperm.glmer <- function (...) clusterperm.lmer(...)
+clusterperm.glmer <- function (...) return(clusterperm.lmer(...))
 
 #' Cluster-based permutation tests for time series data, based on generalized linear models or other \code{buildmer} models. This is an alias for \code{clusterperm.lm} provided for discoverability.
 #' @param ... Arguments to be passed to \code{clusterperm.lm}.
@@ -59,7 +54,7 @@ clusterperm.glmer <- function (...) clusterperm.lmer(...)
 #' \dontshow{perms <- clusterperm.glm(Fz ~ Deviant * Session,data=MMN[MMN$Time > 200 & MMN$Time < 205,],series.var=~Time,nperm=2)}
 #' @seealso clusterperm.lm, clusterperm.lmer
 #' @export
-clusterperm.glm <- function (...) clusterperm.lm(...)
+clusterperm.glm <- function (...) return(clusterperm.lm(...))
 
 #' A general permutation test for mixed-effects models or other \code{buildmer} models.
 #' @param formula A normal formula, possibly using \code{lme4}-style random effects. This can also be a buildmer terms object, provided \code{dep} is passed in \code{buildmerControl}. Only a single response variable is supported. For binomial models, the \code{cbind} syntax is not supported; please convert your dependent variable to a proportion and use weights instead.
@@ -143,11 +138,6 @@ perm.glmmTMB <- function (formula,data=NULL,family=gaussian(),weights=NULL,offse
 #' @importFrom stats gaussian
 #' @export
 perm.lm <- function (formula,data=NULL,family=gaussian(),weights=NULL,offset=NULL,buildmerControl=list(direction='order',crit='LRT',quiet=TRUE,ddf='lme4'),nperm=1000,type='regression',progress=TRUE) {
-	if (type == 'regression') {
-		pkgcheck('buildmer')
-	} else {
-		pkgcheck(c('buildmer','car'))
-	}
 	if (!is.data.frame(formula)) {
 		if ('dep' %in% names(buildmerControl)) stop('Something is wrong --- formula is not a data frame, but dep has been passed to buildmerControl')
 		buildmerControl$dep <- as.character(formula[2])
