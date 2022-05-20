@@ -64,11 +64,6 @@ clusterperm.work <- function (buildmer,formula,data,family,weights,offset,series
 	if (length(type) != 1 || !type %in% c('anova','regression')) {
 		stop("Invalid 'type' argument (specify one of 'anova' or 'regression')")
 	}
-	if (type == 'regression') {
-		pkgcheck(c('buildmer','permuco'))
-	} else {
-		pkgcheck(c('buildmer','car','permuco'))
-	}
 	dep <- if ('dep' %in% names(buildmerControl)) buildmerControl$dep else as.character(formula[2])
 	if (all(is.null(weights))) {
 		weights <- rep(1,length(data[[dep]]))
@@ -102,6 +97,15 @@ clusterperm.work <- function (buildmer,formula,data,family,weights,offset,series
 			stop('series.var ',series.var,' not found in data')
 		}
 	}
+	check <- 'buildmer'
+	if (has.series) {
+		check <- c(check,'permuco')
+	}
+	if (type == 'anova') {
+		check <- c(check,'car')
+	}
+	pkgcheck(check)
+
 	if (is.character(family)) {
 		family <- get(family)
 	}
