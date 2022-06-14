@@ -1,6 +1,6 @@
 Package: permutes
 Title: Permutation Tests for Time Series Data
-Version: 2.4
+Version: 2.5
 Authors@R: person(c("Cesko", "C."), "Voeten", email = "cvoeten@gmail.com", role = c("aut", "cre"))
 Author: Cesko C. Voeten [aut, cre]
 Maintainer: Cesko C. Voeten <cvoeten@gmail.com>
@@ -13,7 +13,7 @@ Description: Helps you determine the analysis window to use when analyzing dense
 Depends:
     R (>= 2.10)
 Imports:
-    plyr
+    plyr, stats, utils
 Suggests:
     buildmer (>= 2.3), car, doParallel, ggplot2, glmmTMB, knitr, lme4, lmPerm, permuco, rmarkdown, viridis
 License: FreeBSD

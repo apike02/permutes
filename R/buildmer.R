@@ -39,7 +39,7 @@ clusterperm.lmer <- function (formula,data=NULL,family=gaussian(),weights=NULL,o
 #' @param progress A plyr \code{.progress} bar name, see the plyr documentation. If not \code{'none'} while \code{parallel=TRUE}, an ad-hoc solution will be used, which will be visible if the cluster nodes were created with \code{outfile=''}.
 #' @template buildmer2
 #' @details
-#' \code{buildglmmTMB} is much slower than \code{clusterperm.lmer}, but it is also more flexible, allowing for things like beta regression and zero-inflation.
+#' \code{clusterperm.glmmTMB} is much slower than \code{clusterperm.lmer}, but it is also more flexible, allowing for things like beta regression and zero-inflation.
 #' @examples
 #' \donttest{
 #' # buildglmmTMB is much slower than clusterperm.lmer
