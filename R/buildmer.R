@@ -227,13 +227,9 @@ fit.buildmer <- function (t,buildmer,formula,data,family,timepoints,buildmerCont
 	formula <- rbind(new.formula,formula[!fixed,])
 	environment(formula) <- e
 
-	.weights <- data$.weights; .offset <- data$.offset #silence R CMD check warning; also necessary for buildmer =2.0, which did not support NSE for these
-	if (utils::packageVersion('buildmer') < '2.0') {
-		bm <- buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl,weights=.weights,offset=.offset)
-	} else {
-		buildmerControl$args <- c(buildmerControl$args,list(weights=.weights,offset=.offset))
-		bm <- buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl)
-	}
+	.weights <- data$.weights; .offset <- data$.offset #silence R CMD check warning
+	buildmerControl$args <- c(buildmerControl$args,list(weights=.weights,offset=.offset))
+	bm <- buildmer(formula=formula,data=data,family=family,buildmerControl=buildmerControl)
 
 	perms <- lapply(1:length(new.names),function (i) {
 		if (verbose) {
@@ -278,11 +274,14 @@ fit.buildmer <- function (t,buildmer,formula,data,family,timepoints,buildmerCont
 		# 2/3. Random effects have already been partialed out, so these are independent and exchangeable
 		# 4/5. Permute them and estimate a null and alternative model on the permuted data
 		# The offset has been partialed out already, so will be ignored
-		fit <- function (formula,data) suppressWarnings(buildmer(formula,data,family=family,buildmerControl=list(REML=FALSE,quiet=TRUE,direction=NULL,calc.summary=FALSE,calc.anova=FALSE,weights=.weights)))@model
+		fit <- function (formula,data) {
+			perm_weights <- data$.weights #silence R CMD check warning
+			suppressWarnings(buildmer(formula,data,family=family,buildmerControl=list(REML=FALSE,quiet=TRUE,direction=NULL,calc.summary=FALSE,calc.anova=FALSE,args=list(weights=perm_weights))))@model
+		}
 		data <- list(
-			y = e,
-			X = X[,keep],
-			.weights = data$.weights
+			perm_y = e,
+			perm_X = X[,keep],
+			perm_weights = data$.weights
 		)
 		# Optimization: nothing to do if the actually-kept columns are constant
 		if (length(unique(as.vector(X[,keep]))) == 1) {
@@ -304,8 +303,8 @@ fit.buildmer <- function (t,buildmer,formula,data,family,timepoints,buildmerCont
 		}
 
 		# Wrap up
-		m1  <- fit(y ~ 0+X,data)
-		m0  <- fit(y ~ 0,data)
+		m1  <- fit(perm_y ~ 0+perm_X,data)
+		m0  <- fit(perm_y ~ 0,data)
 		ll1 <- stats::logLik(m1)
 		ll0 <- stats::logLik(m0)
 		LRT <- as.numeric(2*(ll1-ll0))
