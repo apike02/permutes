@@ -156,10 +156,13 @@ clusterperm.work <- function (buildmer,formula,data,family,weights,offset,series
 		# see GH issue #4: computing the cluster-mass test will fail in some cases, e.g. when only the intercept is involved (which is not permuted)
 		stat   <- rep(NA,NCOL(samp)) #account for the possible failure case
 		if (has.series) {
-			cmass <- try(suppressWarnings(permuco::compute_clustermass(samp,thresh,sum,'greater'))$main,silent=TRUE)
-			if (!inherits(cmass,'try-error')) {
-				stat <- cmass #succeeded!
-			}
+		  # see GH issue #4: computing the cluster-mass test will fail in some cases, e.g. when only the intercept is involved (which is not permuted)
+		  stat <- try(suppressWarnings(permuco::compute_clustermass(samp,thresh,sum,'greater'))$main,silent=TRUE)
+		  if (inherits(stat,'try-error')) {
+		    stat <- NA
+		  }
+		} else {
+		  stat <- NA
 		}
 		df[df$Factor == x,c('p','cluster_mass','p.cluster_mass','cluster')] <- c(p,stat)
 	}
